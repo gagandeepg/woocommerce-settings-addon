@@ -45,13 +45,15 @@ class Woocommerce_Addon_Settings {
         //this action callback is triggered when wordpress is ready to add new items to menu.
         add_action("admin_menu", array($this, "add_new_menu_items"));
         add_action("admin_init", array($this, "display_options"));
-        
-        
-        
+        add_action('add_meta_boxes', array($this, "add_meta_boxes"), 30);
+        add_action('save_post', array($this, "save_woo_product_meta_box_data"));
+        add_action('wp_head', array($this, "add_meta_title_fields"), 1);
 
         add_filter('plugin_action_links_' . plugin_basename(WMA_PLUGIN_FILE), array($this, 'add_plugin_page_settings'));
 
-        
+        if (!is_admin()) {
+            add_filter('document_title_parts', array($this, 'add_prefix_title'), 20);
+        }
     }
 
     /**
@@ -148,9 +150,25 @@ class Woocommerce_Addon_Settings {
         echo '<p class="description">Add a prefix to the single product page titles</p>';
     }
     
-
-
     
+    /*
+     * add meta title in header
+     */
+    public function add_meta_title_fields() {
+        global $wp_query, $post;
+
+        $value = get_post_meta(get_the_ID(), '_global_notice', true);
+        if ($value) {
+            echo '<meta name="robots" content="noindex"/>', "\n";
+        }
+    }
+    
+    /*
+     * Add metabox on woocommerce product page
+     */
+    public function add_meta_boxes() {
+        add_meta_box('indexing', __('Indexing', 'woocommerce'), array($this, 'add_meta_box_fields'), 'product', 'normal');
+    }
     
     /*
      * Add fields in meta box
@@ -167,8 +185,60 @@ class Woocommerce_Addon_Settings {
         echo '<input type="checkbox" ' . esc_attr( $checked ) . ' id="global_notice" name="global_notice" value="1"> NoIndex';
     }
 
-   
+    /**
+     * When the post is saved, saves our custom data.
+     *
+     * @param int $post_id
+     */
+    function save_woo_product_meta_box_data($post_id) {
 
+        // Check if our nonce is set.
+        if (!isset($_POST['meta_index_nonce'])) {
+            return;
+        }
+
+        // Verify that the nonce is valid.
+        if (!wp_verify_nonce($_POST['meta_index_nonce'], 'meta_index_nonce')) {
+            return;
+        }
+
+        // If this is an autosave, our form has not been submitted, so we don't want to do anything.
+        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
+            return;
+        }
+
+
+        // Check the user's permissions.
+        if (isset($_POST['post_type']) && 'product' == $_POST['post_type']) {
+
+            if (!current_user_can('edit_page', $post_id)) {
+                return;
+            }
+        }
+
+        // Sanitize user input.
+        $data = sanitize_text_field($_POST['global_notice']);
+
+        // Update the meta field in the database.
+        update_post_meta($post_id, '_global_notice', $data);
+    }
+    
+    /*
+     * Add prefix in title tag
+     * 
+     * @param string $title
+     * 
+     * return string $title
+     */
+    function add_prefix_title($title) {
+        $post = get_post(get_the_ID());
+
+        if ($post->post_type == 'product') {
+            $title['title'] = get_option('woo_product_title_prefix') . ' ' . $title['title'];
+        }
+
+        return $title;
+    }
     
     /*
      * Render setting in Woocommerce addon setting
